@@ -1,34 +1,39 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_channel::Sender;
-use iroh::endpoint::Connection;
-use iroh::protocol::{AcceptError, ProtocolHandler, Router};
-use iroh::{Endpoint, NodeId};
-use n0_future::StreamExt;
-use n0_future::boxed::BoxStream;
+use clap::Parser;
+use iroh::{
+    endpoint::Connection,
+    protocol::{AcceptError, ProtocolHandler, Router},
+    Endpoint, NodeId,
+};
+use n0_future::{task, Stream, StreamExt, boxed::BoxStream};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
-use tokio::task;
-use tokio_stream::Stream;
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::info;
-use wasm_bindgen::JsError;
 
+/// The main application node that can either accept or initiate connections.
 #[derive(Debug, Clone)]
-pub struct EchoNode {
+pub struct AppNode {
     router: Router,
     accept_events: broadcast::Sender<AcceptEvent>,
 }
 
-impl EchoNode {
+impl AppNode {
     pub async fn spawn() -> Result<Self> {
         let endpoint = Endpoint::builder()
             .discovery_n0()
-            .alpns(vec![Echo::ALPN.to_vec()])
+            .alpns(vec![ConnectionHandler::ALPN.to_vec()])
             .bind(true)
             .await?;
-        let (event_sender, _event_receiver) = broadcast::channel(128);
-        let echo = Echo::new(event_sender.clone());
-        let router = Router::builder(endpoint).accept(Echo::ALPN, echo).spawn();
+
+        let (event_sender, _) = broadcast::channel(128);
+        let handler = ConnectionHandler::new(event_sender.clone());
+
+        let router = Router::builder(endpoint)
+            .accept(ConnectionHandler::ALPN, handler)
+            .spawn();
+
         Ok(Self {
             router,
             accept_events: event_sender,
@@ -48,14 +53,16 @@ impl EchoNode {
         &self,
         node_id: NodeId,
         payload: String,
-    ) -> impl Stream<Item = ConnectEvent> + Unpin + use<> {
+    ) -> impl Stream<Item = ConnectEvent> + Unpin {
         let (event_sender, event_receiver) = async_channel::bounded(16);
         let endpoint = self.router.endpoint().clone();
+
         task::spawn(async move {
             let res = connect(&endpoint, node_id, payload, event_sender.clone()).await;
-            let error = res.as_ref().err().map(|err| err.to_string());
+            let error = res.as_ref().err().map(|e| e.to_string());
             event_sender.send(ConnectEvent::Closed { error }).await.ok();
         });
+
         Box::pin(event_receiver)
     }
 }
@@ -70,35 +77,25 @@ pub enum ConnectEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", content = "camelCase")]
+#[serde(tag = "type", rename_all = "camelCase")]
 pub enum AcceptEvent {
-    Accepted {
-        node_id: NodeId,
-    },
-    Echoed {
-        node_id: NodeId,
-        bytes_sent: u64,
-    },
-    Closed {
-        node_id: NodeId,
-        error: Option<String>,
-    },
+    Accepted { node_id: NodeId },
+    Processed { node_id: NodeId, bytes: u64 },
+    Closed { node_id: NodeId, error: Option<String> },
 }
 
 #[derive(Debug, Clone)]
-pub struct Echo {
+pub struct ConnectionHandler {
     event_sender: broadcast::Sender<AcceptEvent>,
 }
 
-impl Echo {
-    pub const ALPN: &[u8] = b"iroh/example-browser-echo/0";
+impl ConnectionHandler {
+    pub const ALPN: &'static [u8] = b"iroh/app-protocol/0";
 
     pub fn new(event_sender: broadcast::Sender<AcceptEvent>) -> Self {
         Self { event_sender }
     }
-}
 
-impl Echo {
     async fn handle_connection(
         self,
         connection: Connection,
@@ -109,41 +106,37 @@ impl Echo {
             .send(AcceptEvent::Accepted { node_id })
             .ok();
 
-        let res = self.handle_connection_0(&connection).await;
-        let error = res.as_ref().err().map(|err| err.to_string());
+        let res = self.process_streams(&connection).await;
+        let error = res.as_ref().err().map(|e| e.to_string());
+
         self.event_sender
             .send(AcceptEvent::Closed { node_id, error })
             .ok();
+
         res
     }
 
-    async fn handle_connection_0(
-        &self,
-        connection: &Connection,
-    ) -> std::result::Result<(), AcceptError> {
+    async fn process_streams(&self, connection: &Connection) -> Result<(), AcceptError> {
         let node_id = connection.remote_node_id()?;
         info!("Accepted connection from {node_id}");
 
         let (mut send, mut recv) = connection.accept_bi().await?;
 
-        let bytes_sent = tokio::io::copy(&mut recv, &mut send).await?;
-        info!("Copied over {bytes_sent} byte(s)");
+        let bytes = tokio::io::copy(&mut recv, &mut send).await?;
+        info!("Transferred {bytes} bytes");
+
         self.event_sender
-            .send(AcceptEvent::Echoed {
-                node_id,
-                bytes_sent,
-            })
+            .send(AcceptEvent::Processed { node_id, bytes })
             .ok();
 
         send.finish()?;
-
         connection.closed().await;
 
         Ok(())
     }
 }
 
-impl ProtocolHandler for Echo {
+impl ProtocolHandler for ConnectionHandler {
     async fn accept(&self, connection: Connection) -> std::result::Result<(), AcceptError> {
         self.clone().handle_connection(connection).await
     }
@@ -155,10 +148,11 @@ async fn connect(
     payload: String,
     event_sender: Sender<ConnectEvent>,
 ) -> Result<()> {
-    let connection = endpoint.connect(node_id, Echo::ALPN).await?;
+    let connection = endpoint.connect(node_id, ConnectionHandler::ALPN).await?;
     event_sender.send(ConnectEvent::Connected).await?;
 
     let (mut send_stream, mut recv_stream) = connection.open_bi().await?;
+
     let send_task = task::spawn({
         let event_sender = event_sender.clone();
         async move {
@@ -169,18 +163,67 @@ async fn connect(
                     bytes_sent: bytes_sent as u64,
                 })
                 .await?;
-            anyhow::Ok(())
+            Ok::<_, anyhow::Error>(())
         }
     });
 
-    let n = tokio::io::copy(&mut recv_stream, &mut tokio::io::sink()).await?;
+    let bytes_received = tokio::io::copy(&mut recv_stream, &mut tokio::io::sink()).await?;
 
     connection.close(1u8.into(), b"done");
+
     event_sender
         .send(ConnectEvent::Received {
-            bytes_received: n as u64,
+            bytes_received,
         })
         .await?;
-    send_task.await?;
+
+    send_task.await??;
+    Ok(())
+}
+
+
+
+/// Simple CLI for connecting or hosting a node.
+#[derive(Parser, Debug)]
+#[command(author, version, about)]
+struct Args {
+    /// Optional: connect to a remote node by NodeId.
+    #[arg(long)]
+    connect: Option<String>,
+
+    /// Optional: message to send to the remote node.
+    #[arg(long, default_value = "Hello from CLI")]
+    message: String,
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    tracing_subscriber::fmt::init(); // Optional: enable logging
+
+    let args = Args::parse();
+
+    let node = AppNode::spawn().await?;
+    let my_id = node.endpoint().node_id();
+
+    println!("🚀 My Node ID: {my_id}");
+
+    if let Some(peer_id_str) = args.connect {
+        let peer_id: NodeId = peer_id_str
+            .parse()
+            .context("Invalid NodeId format for --connect")?;
+        println!("🔗 Connecting to {peer_id}...");
+
+        let mut stream = node.connect(peer_id, args.message);
+        while let Some(event) = stream.next().await {
+            println!("📡 Event: {:?}", event);
+        }
+    } else {
+        println!("📬 Listening for connections...");
+        let mut events = node.accept_events();
+        while let Some(event) = events.next().await {
+            println!("📥 Incoming: {:?}", event);
+        }
+    }
+
     Ok(())
 }
