@@ -707,7 +707,7 @@ dependencies = [
  "iroh",
  "iroh-metrics",
  "n0-snafu",
- "n0-watcher",
+ "n0-watcher 0.3.0",
  "postcard",
  "serde",
  "tokio",
@@ -1418,7 +1418,7 @@ dependencies = [
  "iroh-relay",
  "n0-future",
  "n0-snafu",
- "n0-watcher",
+ "n0-watcher 0.2.0",
  "nested_enum_utils",
  "netdev",
  "netwatch",
@@ -1785,6 +1785,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "n0-watcher"
+version = "0.3.0"
+dependencies = [
+ "derive_more",
+ "n0-future",
+ "snafu",
+]
+
+[[package]]
 name = "nested_enum_utils"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1906,7 +1915,7 @@ dependencies = [
  "js-sys",
  "libc",
  "n0-future",
- "n0-watcher",
+ "n0-watcher 0.2.0",
  "nested_enum_utils",
  "netdev",
  "netlink-packet-core",
