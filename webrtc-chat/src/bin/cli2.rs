@@ -27,14 +27,11 @@ async fn main() -> Result<()> {
             while let Some(event) = events.next().await {
                 match event {
                     ConnectEvent::Connected => {
-
                         println!("Connection established")
-
                     }
                     ConnectEvent::Sent { bytes_sent } => {
 
                         // println!("Sent: {} bytes", bytes_sent);
-
                     }
                     ConnectEvent::Received { bytes_received } => {
                         // println!("Received: {} bytes", bytes_received);
@@ -56,20 +53,23 @@ async fn main() -> Result<()> {
             );
             let mut events = node.accept_events();
             while let Some(event) = events.next().await {
-
                 match event {
                     AcceptEvent::Accepted { node_id } => {
-
                         println!("Accepted connection {}", node_id);
-
                     }
-                    AcceptEvent::Echoed { node_id, bytes_sent } => {
+                    AcceptEvent::Echoed {
+                        node_id,
+                        bytes_sent,
+                    } => {
                         println!("Echoed: {} bytes", bytes_sent);
                     }
                     AcceptEvent::Closed { error, node_id } => {
                         println!("Connection closed due to error: {:?}", error);
                     }
-                    AcceptEvent::StreamData { node_id, bytes_received } => {
+                    AcceptEvent::StreamData {
+                        node_id,
+                        bytes_received,
+                    } => {
                         // println!("StreamData: {} bytes", bytes_received);
                     }
                 }

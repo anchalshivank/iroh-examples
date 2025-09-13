@@ -1,13 +1,13 @@
-use webrtc_chat::node2::{AcceptEvent, ConnectEvent, EchoNode};
+use chrono;
 use iroh::node_info::NodeData;
 use iroh::{NodeId, TransportMode};
 use n0_future::StreamExt;
-use std::time::Duration;
-use std::env;
 use std::collections::BTreeSet;
+use std::env;
 use std::str::FromStr;
-use chrono;
+use std::time::Duration;
 use tokio::time;
+use webrtc_chat::node2::{AcceptEvent, ConnectEvent, EchoNode};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -32,9 +32,7 @@ async fn main() -> anyhow::Result<()> {
     if let Some(mut stream) = node.subscribe() {
         tokio::spawn(async move {
             while let Some(item) = stream.next().await {
-                println!("DISCOVERED: {} from {}",
-                         item.node_id(),
-                         item.provenance());
+                println!("DISCOVERED: {} from {}", item.node_id(), item.provenance());
             }
         });
     }
@@ -47,7 +45,10 @@ async fn main() -> anyhow::Result<()> {
                 AcceptEvent::Accepted { node_id } => {
                     println!("✓ Connection accepted from: {}", node_id);
                 }
-                AcceptEvent::Echoed { node_id, bytes_sent } => {
+                AcceptEvent::Echoed {
+                    node_id,
+                    bytes_sent,
+                } => {
                     println!("✓ Echoed {} bytes back to: {}", bytes_sent, node_id);
                 }
                 AcceptEvent::Closed { node_id, error } => {
@@ -57,7 +58,10 @@ async fn main() -> anyhow::Result<()> {
                         println!("✓ Connection closed cleanly with: {}", node_id);
                     }
                 }
-                AcceptEvent::StreamData { bytes_received, node_id } => {
+                AcceptEvent::StreamData {
+                    bytes_received,
+                    node_id,
+                } => {
                     println!("📡 Received {} bytes from: {}", bytes_received, node_id);
                 }
             }

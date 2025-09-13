@@ -1,14 +1,18 @@
 use anyhow::Result;
 use async_channel::Sender;
-use iroh::{Endpoint, NodeId, endpoint::Connection, protocol::{AcceptError, ProtocolHandler, Router}, TransportMode};
+use iroh::discovery::DiscoveryItem;
+use iroh::node_info::NodeData;
+use iroh::{
+    Endpoint, NodeId, TransportMode,
+    endpoint::Connection,
+    protocol::{AcceptError, ProtocolHandler, Router},
+};
 use n0_future::{Stream, StreamExt, boxed::BoxStream, task};
 use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::info;
-use iroh::discovery::DiscoveryItem;
-use iroh::node_info::NodeData;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[derive(Debug, Clone)]
 pub struct EchoNode {
@@ -93,9 +97,11 @@ impl EchoNode {
         if let Some(ref discovery) = endpoint.discovery() {
             let stream = discovery.subscribe()?;
             Some(stream.map(|item| {
-                info!("Discovered peer: {} from {}",
-                  item.node_id().fmt_short(),
-                  item.provenance());
+                info!(
+                    "Discovered peer: {} from {}",
+                    item.node_id().fmt_short(),
+                    item.provenance()
+                );
                 item
             }))
         } else {
@@ -117,10 +123,21 @@ pub enum ConnectEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum AcceptEvent {
-    Accepted { node_id: NodeId },
-    Echoed { node_id: NodeId, bytes_sent: u64 },
-    Closed { node_id: NodeId, error: Option<String> },
-    StreamData { node_id: NodeId, bytes_received: u64 }, // New event for streaming data
+    Accepted {
+        node_id: NodeId,
+    },
+    Echoed {
+        node_id: NodeId,
+        bytes_sent: u64,
+    },
+    Closed {
+        node_id: NodeId,
+        error: Option<String>,
+    },
+    StreamData {
+        node_id: NodeId,
+        bytes_received: u64,
+    }, // New event for streaming data
 }
 
 #[derive(Debug, Clone)]
@@ -166,9 +183,7 @@ impl Echo {
         loop {
             let mut buffer = [0u8; 1024];
             match recv.read(&mut buffer).await {
-
                 Ok(bytes_read) => {
-
                     match bytes_read {
                         None => {}
                         Some(0) => {
@@ -190,10 +205,8 @@ impl Echo {
                                 .ok();
 
                             info!("Streamed {} bytes with {node_id}", bytes_read);
-
                         }
                     }
-
                 }
                 Err(e) => {
                     info!("Read error from {node_id}: {e}");
@@ -241,7 +254,6 @@ async fn connect_persistent(
     node_id: NodeId,
     event_sender: Sender<ConnectEvent>,
 ) -> Result<()> {
-
     //Here connection is established
     let connection = endpoint.connect(node_id, Echo::ALPN).await?;
 
@@ -259,8 +271,12 @@ async fn connect_persistent(
                 let timestamp = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)?
                     .as_secs();
-                let message = format!("Stream message #{} at {}: {}",
-                                      counter, timestamp, "x".repeat(20));
+                let message = format!(
+                    "Stream message #{} at {}: {}",
+                    counter,
+                    timestamp,
+                    "x".repeat(20)
+                );
 
                 match send_stream.write_all(message.as_bytes()).await {
                     Ok(()) => {
@@ -290,25 +306,21 @@ async fn connect_persistent(
             let mut buffer = [0u8; 1024];
             loop {
                 match recv_stream.read(&mut buffer).await {
-
-                    Ok(bytes_read) => {
-                        match bytes_read {
-                            None => {}
-                            Some(0) => {
-                                    info!("Receive stream ended");
-                                    break;
-                            }
-                            Some(bytes_read)=> {
-                                event_sender
-                                    .send(ConnectEvent::Received {
-                                        bytes_received: bytes_read as u64,
-                                    })
-                                    .await?;
-                                info!("Received {} bytes back", bytes_read);
-                            }
+                    Ok(bytes_read) => match bytes_read {
+                        None => {}
+                        Some(0) => {
+                            info!("Receive stream ended");
+                            break;
                         }
-
-                    }
+                        Some(bytes_read) => {
+                            event_sender
+                                .send(ConnectEvent::Received {
+                                    bytes_received: bytes_read as u64,
+                                })
+                                .await?;
+                            info!("Received {} bytes back", bytes_read);
+                        }
+                    },
                     Err(e) => {
                         info!("Receive error: {e}");
                         break;

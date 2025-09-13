@@ -1,5 +1,7 @@
 use anyhow::Result;
 use async_channel::Sender;
+use iroh::discovery::DiscoveryItem;
+use iroh::node_info::NodeData;
 use iroh::{
     Endpoint, NodeId,
     endpoint::Connection,
@@ -10,15 +12,12 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::info;
-use iroh::discovery::DiscoveryItem;
-use iroh::node_info::NodeData;
 
 #[derive(Debug, Clone)]
 pub struct EchoNode {
     router: Router,
     accept_events: broadcast::Sender<AcceptEvent>,
 }
-
 
 impl EchoNode {
     pub async fn spawn() -> Result<Self> {
@@ -60,15 +59,9 @@ impl EchoNode {
         Box::pin(event_receiver)
     }
 
-
-    pub fn publish(
-        &self,
-        data: NodeData
-    ) {
-
+    pub fn publish(&self, data: NodeData) {
         let endpoint = self.router.endpoint();
-        if let Some(ref dis)=  endpoint.discovery(){
-
+        if let Some(ref dis) = endpoint.discovery() {
             dis.publish(&data)
         };
     }
@@ -90,19 +83,17 @@ impl EchoNode {
             let stream = discovery.subscribe()?;
             // Process each discovered item
             Some(stream.map(|item| {
-                info!("Discovered peer: {} from {}",
-                  item.node_id().fmt_short(),
-                  item.provenance());
+                info!(
+                    "Discovered peer: {} from {}",
+                    item.node_id().fmt_short(),
+                    item.provenance()
+                );
                 item
             }))
         } else {
             None
         }
     }
-
-
-
-
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -127,7 +118,7 @@ pub enum AcceptEvent {
     Closed {
         node_id: NodeId,
         error: Option<String>,
-    }
+    },
 }
 
 #[derive(Debug, Clone)]
