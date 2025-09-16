@@ -1839,6 +1839,7 @@ dependencies = [
  "rustls-pki-types",
  "rustls-webpki",
  "serde",
+ "serde_json",
  "smallvec",
  "snafu",
  "spki",

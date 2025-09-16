@@ -66,34 +66,34 @@ impl EchoNode {
         };
     }
 
-    pub fn subscribe(&self) -> Option<BoxStream<DiscoveryItem>> {
-        let endpoint = self.router.endpoint();
-        if let Some(ref discovery) = endpoint.discovery() {
-            // Return the discovery stream directly
-            discovery.subscribe()
-        } else {
-            None
-        }
-    }
+    // pub fn subscribe(&self) -> Option<BoxStream<DiscoveryItem>> {
+    //     let endpoint = self.router.endpoint();
+    //     if let Some(ref discovery) = endpoint.discovery() {
+    //         // Return the discovery stream directly
+    //         discovery.subscribe()
+    //     } else {
+    //         None
+    //     }
+    // }
 
-    // Or if you want to process the discoveries:
-    pub fn subscribe_and_process(&self) -> Option<impl Stream<Item = DiscoveryItem>> {
-        let endpoint = self.router.endpoint();
-        if let Some(ref discovery) = endpoint.discovery() {
-            let stream = discovery.subscribe()?;
-            // Process each discovered item
-            Some(stream.map(|item| {
-                info!(
-                    "Discovered peer: {} from {}",
-                    item.node_id().fmt_short(),
-                    item.provenance()
-                );
-                item
-            }))
-        } else {
-            None
-        }
-    }
+    // // Or if you want to process the discoveries:
+    // pub fn subscribe_and_process(&self) -> Option<impl Stream<Item = DiscoveryItem>> {
+    //     let endpoint = self.router.endpoint();
+    //     if let Some(ref discovery) = endpoint.discovery() {
+    //         let stream = discovery.subscribe()?;
+    //         // Process each discovered item
+    //         Some(stream.map(|item| {
+    //             info!(
+    //                 "Discovered peer: {} from {}",
+    //                 item.node_id().fmt_short(),
+    //                 item.provenance()
+    //             );
+    //             item
+    //         }))
+    //     } else {
+    //         None
+    //     }
+    // }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
